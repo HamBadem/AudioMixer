@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio Mixer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #f4f4f4;
+            margin: 0;
+        }
+        .container {
+            background-color: #fff;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 0 auto;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            text-align: center;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s ease;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #message {
+            margin-top: 20px;
+            color: green;
+            font-weight: bold;
+        }
+        #warning {
+            margin-top: 10px;
+            color: orange;
+            font-size: 0.9em;
+        }
+        #downloadLink {
+            display: none;
+            margin-top: 20px;
+            background-color: #28a745;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            text-decoration: none;
+            font-size: 16px;
+        }
+        #downloadLink:hover {
+            background-color: #218838;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Audio Playlist Mixer</h1>
+        <form id="audioMixerForm">
+            <div class="form-group">
+                <label for="audioFiles">Upload Audio Files:</label>
+                <input type="file" id="audioFiles" accept="audio/*" multiple>
+                <div id="warning">Only audio files (mp3, wav, wma, etc.) are accepted.</div>
+            </div>
+
+            <div class="form-group">
+                <label for="delayInput">Delay between songs (seconds):</label>
+                <input type="number" id="delayInput" value="0" min="0">
+            </div>
+
+            <button type="submit">Mix Audio</button>
+        </form>
+        <div id="message"></div>
+        <a id="downloadLink" download="mixed_audio.wav">Download Mixed Audio</a>
+    </div>
+
+    <script>
+        document.getElementById('audioMixerForm').addEventListener('submit', async function(event) {
+            event.preventDefault();
+
+            const audioFiles = document.getElementById('audioFiles').files;
+            const delaySeconds = parseFloat(document.getElementById('delayInput').value);
+            const messageDiv = document.getElementById('message');
+            const downloadLink = document.getElementById('downloadLink');
+
+            messageDiv.textContent = '';
+            downloadLink.style.display = 'none';
+
+            if (audioFiles.length === 0) {
+                messageDiv.textContent = 'Please select audio files to mix.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+
+            if (isNaN(delaySeconds) || delaySeconds < 0) {
+                messageDiv.textContent = 'Please enter a valid non-negative number for delay.';
+                messageDiv.style.color = 'red';
+                return;
+            }
+
+            messageDiv.textContent = 'Mixing audio... Please wait.';
+            messageDiv.style.color = 'blue';
+
+            try {
+                // We'll use the Web Audio API for mixing
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                const audioContext = new AudioContext();
+
+                const buffers = [];
+                let totalDuration = 0;
+
+                // Load each audio file
+                for (let i = 0; i < audioFiles.length; i++) {
+                    const file = audioFiles[i];
+                    const arrayBuffer = await file.arrayBuffer();
+                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    buffers.push(audioBuffer);
+                    totalDuration += audioBuffer.duration;
+                    if (i < audioFiles.length - 1) { // Add delay for all but the last song
+                        totalDuration += delaySeconds;
+                    }
+                }
+
+                // Create a new buffer for the mixed audio
+                const mixedAudioBuffer = audioContext.createBuffer(
+                    2, // Stereo
+                    audioContext.sampleRate * totalDuration,
+                    audioContext.sampleRate
+                );
+
+                let currentOffset = 0;
+
+                // Copy audio data to the mixed buffer
+                for (let i = 0; i < buffers.length; i++) {
+                    const buffer = buffers[i];
+                    for (let channel = 0; channel < mixedAudioBuffer.numberOfChannels; channel++) {
+                        mixedAudioBuffer.copyToChannel(buffer.getChannelData(channel), channel, currentOffset);
+                    }
+                    currentOffset += buffer.duration * audioContext.sampleRate;
+                    if (i < buffers.length - 1) {
+                        currentOffset += delaySeconds * audioContext.sampleRate;
+                    }
+                }
+
+                // Convert AudioBuffer to WAV Blob
+                // This is a simplified WAV exporter. For a robust solution, consider a library.
+                const wavBlob = audioBufferToWav(mixedAudioBuffer);
+
+                downloadLink.href = URL.createObjectURL(wavBlob);
+                downloadLink.download = 'mixed_audio.wav';
+                downloadLink.style.display = 'block';
+                messageDiv.textContent = 'Audio mixed successfully!';
+                messageDiv.style.color = 'green';
+
+            } catch (error) {
+                console.error('Error mixing audio:', error);
+                messageDiv.textContent = 'Error mixing audio. Please try again.';
+                messageDiv.style.color = 'red';
+            }
+        });
+
+        // Simple function to convert AudioBuffer to WAV Blob
+        // This is a basic implementation and might not handle all edge cases or very large files efficiently.
+        // For production, consider using a dedicated library like 'recorderjs' or 'web-audio-recorder-js'.
+        function audioBufferToWav(audioBuffer) {
+            const numOfChannels = audioBuffer.numberOfChannels;
+            const sampleRate = audioBuffer.sampleRate;
+            const format = 1; // PCM (uncompressed)
+            const bitDepth = 16;
+            const bytesPerSample = bitDepth / 8;
+            const blockAlign = numOfChannels * bytesPerSample;
+            const byteRate = sampleRate * blockAlign;
+            const dataSize = audioBuffer.length * blockAlign;
+            const fileSize = 36 + dataSize;
+
+            const buffer = new ArrayBuffer(fileSize);
+            const view = new DataView(buffer);
+
+            let offset = 0;
+
+            /* RIFF chunk */
+            writeString('RIFF'); offset += 4;
+            view.setUint32(offset, fileSize - 8, true); offset += 4;
+            writeString('WAVE'); offset += 4;
+
+            /* fmt chunk */
+            writeString('fmt '); offset += 4;
+            view.setUint32(offset, 16, true); offset += 4; // Subchunk1Size for PCM
+            view.setUint16(offset, format, true); offset += 2;
+            view.setUint16(offset, numOfChannels, true); offset += 2;
+            view.setUint32(offset, sampleRate, true); offset += 4;
+            view.setUint32(offset, byteRate, true); offset += 4;
+            view.setUint16(offset, blockAlign, true); offset += 2;
+            view.setUint16(offset, bitDepth, true); offset += 2;
+
+            /* data chunk */
+            writeString('data'); offset += 4;
+            view.setUint32(offset, dataSize, true); offset += 4;
+
+            // Write audio data
+            for (let i = 0; i < audioBuffer.length; i++) {
+                for (let channel = 0; channel < numOfChannels; channel++) {
+                    const sample = Math.max(-1, Math.min(1, audioBuffer.getChannelData(channel)[i]));
+                    view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7FFF, true);
+                    offset += 2;
+                }
+            }
+
+            function writeString(s) {
+                for (let i = 0; i < s.length; i++) {
+                    view.setUint8(offset + i, s.charCodeAt(i));
+                }
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+    </script>
+</body>
+</html>
